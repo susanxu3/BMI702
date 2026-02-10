@@ -11,8 +11,6 @@ The pipeline has four layers:
 3. **Knowledge Graph Integration** — Places disrupted genes and pathways onto a biomedical knowledge graph linking diseases, targets, drugs, and safety data.
 4. **Drug Scoring & Reasoning** — Ranks candidate drugs using graph-based ML and generates mechanistic rationales via an LLM agent, including safety and contraindication checks.
 
-![Pipeline Overview](Variant_to_Drug_Pipeline_Flowchart.pdf)
-
 ## Output
 
 For each candidate drug, the system produces:
