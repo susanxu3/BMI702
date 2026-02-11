@@ -16,8 +16,8 @@ The pipeline has the following layers:
 
 For a given patient or rare disease, the system produces:
 
-- Ranked list of candidate drugs for repurposing, scored by mechanistic relevance
-- Evidence chains tracing each hypothesis from variant → gene → pathway → drug
-- Cell-type context identifying which cell types are likely affected
-- Safety and contraindication flags
+- Candidate drugs for repurposing, scored by mechanistic relevance
+- Evidence tracing each from variant → gene → pathway → drug
+- Cell-type context
+- Safety flags
 - Literature support
