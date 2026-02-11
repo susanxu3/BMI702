@@ -1,6 +1,6 @@
 # BMI702 - Rare Disease AI Scientist
 
-Given a patient's rare genetic variants (VCF), the system traces a path from **variant → affected cell type → disrupted gene/pathway → candidate drug**, producing ranked therapeutic hypotheses with mechanistic explanations. Most rare disease patients face a long diagnostic odyssey and limited treatment options. This project aims to accelerate the search for repurposable drugs by combining genomic analysis with AI reasoning.
+Given a rare disease, the AI scientist traces a path from **variant → affected cell type → disrupted gene/pathway → candidate drug**, producing ranked therapeutic hypotheses with mechanistic explanations. Most rare disease patients face a long diagnostic odyssey and limited treatment options. This project aims to accelerate the search for repurposable drugs by combining genomic analysis with AI reasoning.
 
 ## Workflow
 
