@@ -1,6 +1,6 @@
 # BMI702 - Rare Disease AI Scientist
 
-Given a rare disease, the AI scientist produces ranked therapeutic hypotheses by tracing a path from variant → affected cell type → disrupted gene/pathway → candidate drug. 
+Given a rare disease, the AI scientist produces ranked therapeutic hypotheses by tracing a path from **variant → affected cell type → disrupted gene/pathway → candidate drug**. 
 
 ## Workflow
 
