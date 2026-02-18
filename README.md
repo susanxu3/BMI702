@@ -38,7 +38,13 @@ For a given patient phenotype set, the system produces:
 
 ## Key Innovation
 
-Unlike TxGNN, which represents diseases as fixed graph nodes, this model treats a patient as a **set of HPO phenotypes** and dynamically constructs a disease representation at inference time — enabling drug prediction without a confirmed diagnosis.
+Improving current graph AI for drug prediction in **undiagnosed or atypically-presenting rare disease patients**.
+
+- **TxGNN** requires a confirmed disease label — each disease is a fixed node in the graph with a static embedding. Our model replaces this with a dynamic disease representation constructed at inference time from a patient's observed HPO phenotype set, requiring no diagnosis.
+- **SHEPHERD** takes phenotype sets as input but targets diagnostic prediction (which gene/disease is responsible), not drug prediction. Its phenotype aggregation is also a simple sum pooling with no conditioning on the downstream task.
+- **PINNACLE** introduces context-conditioned node embeddings (same protein, different embedding per cell type). We apply the same intuition in reverse: same phenotype set, different disease representation per candidate drug — making the representation drug-conditioned rather than cell-type-conditioned.
+
+Together, our model is the first to combine **phenotype-set input** (from SHEPHERD) with **conditional representation** (from PINNACLE) in a drug prediction framework (from TxGNN), specifically targeting the undiagnosed patient setting.
 
 ## Implementation
 
