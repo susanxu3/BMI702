@@ -14,13 +14,18 @@ Given a rare disease patient's phenotype set, the model produces ranked drug can
 ## Data
 
 Open Targets — gene-disease and drug-disease associations
+
 Human Phenotype Ontology (HPO) — phenotype terms and hierarchy
+
 STRING — protein-protein interaction network
-GWAS Catalog — common variant-to-phenotype associations used as additional graph edges
+
+GWAS Catalog — common variant-to-phenotype associations used as additional graph edges (Optional)
 
 ## Model
 A two-component model trained end-to-end:
+
 R-GCN — trained on the biomedical knowledge graph to produce node embeddings for genes, drugs, phenotypes, and pathways
+
 Cross-attention layer — trained to produce drug-conditioned disease representations from patient HPO phenotype sets; drug embeddings serve as queries, phenotype embeddings as keys and values
 
 ## Output
