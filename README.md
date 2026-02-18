@@ -19,7 +19,7 @@ For a given patient phenotype set, the system produces:
 - Interpretable rationale (e.g., *"losartan ← aortic root dilation 0.6, mitral valve prolapse 0.2"*)
 - Zero-shot predictions for undiagnosed patients with arbitrary phenotype combinations
 
-## Key Design Choice
+## Key Innovation
 
 Unlike TxGNN, which represents diseases as fixed graph nodes, this model treats a patient as a **set of HPO phenotypes** and dynamically constructs a disease representation at inference time — enabling drug prediction without a confirmed diagnosis.
 
