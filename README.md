@@ -1,6 +1,9 @@
 # Phenotype-Conditioned Drug Prediction for Rare Diseases
 
-Given a rare disease patient's phenotype set, the model produces ranked drug candidates by dynamically constructing a patient-specific disease representation via **drug-conditioned cross-attention** over phenotype embeddings on a biomedical knowledge graph.
+Given a rare disease patient's phenotype set, the model produces ranked drug candidates by dynamically constructing a patient-specific disease representation via **drug-conditioned cross-attention** over phenotype embeddings on a biomedical knowledge graph. The insiprations are:
+- **TxGNN** (Huang et al., 2024) — zero-shot drug repurposing on biomedical knowledge graphs; we extend its graph-based drug prediction framework to handle patient phenotype sets rather than fixed disease nodes
+- **SHEPHERD** (Alsentzer et al., 2023) — GNN-based rare disease diagnosis from phenotype and variant inputs; we adopt the phenotype-as-input paradigm but redirect it toward drug prediction with drug-conditioned aggregation
+- **PINNACLE** (Arakelyan et al., 2024) — context-conditioned protein embeddings; we apply the same conditioning intuition to disease representations, making them drug-conditioned rather than cell-type-conditioned
 
 ## Workflow
 
