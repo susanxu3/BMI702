@@ -51,3 +51,8 @@ Together, our model is the first to combine **phenotype-set input** (from SHEPHE
 - Standard R-GCN (PyTorch Geometric) + transformer cross-attention (PyTorch). 
 - Graph constructed via Open Targets API. 
 - Runs on Google Colab.
+
+## Colab & Data Files Link
+https://colab.research.google.com/drive/1ESFVAFzeMDTkSXeO8CiCU4cfwScs0fzB?authuser=1#scrollTo=AcIMNq1969GR
+
+https://drive.google.com/drive/u/1/folders/14soGgEbW-K6NFWTzVSuxmJbri_WSmVYy
