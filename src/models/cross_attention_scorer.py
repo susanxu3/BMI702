@@ -1,13 +1,19 @@
-"""Drug-conditioned cross-attention scorer.
+"""Drug-conditioned cross-attention scorer + flat PhenoDrugModel.
 
 Drug embedding = query, phenotype embeddings = keys/values.
 Produces a scalar relevance score per (drug, phenotype-set) pair.
+
+PhenoDrugModel keeps a flat parameter layout (node_emb, convs, norms,
+cross_attn) that matches the training notebook (`src/pagerank & new model.ipynb`),
+so checkpoints saved by that notebook load directly via `load_state_dict`.
 """
 
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import RGCNConv
 
 
 class DrugConditionedCrossAttention(nn.Module):
@@ -49,23 +55,68 @@ class DrugConditionedCrossAttention(nn.Module):
 
 
 class PhenoDrugModel(nn.Module):
-    """End-to-end model: R-GCN encoder + cross-attention scorer.
+    """End-to-end model: R-GCN layers + cross-attention scorer (flat layout).
+
+    Parameter layout matches the training notebook so checkpoints load directly:
+        node_emb.weight
+        convs.0.*, convs.1.*, ...
+        norms.0.*, norms.1.*, ...
+        cross_attn.attn.*, cross_attn.score_proj.*
 
     Args:
-        encoder: RGCNEncoder instance.
-        hidden_dim: Embedding dimension.
+        num_nodes: Total nodes in PrimeKG graph.
+        num_relations: Number of relation types (including reverse edges).
+        hidden_dim: Embedding dimensionality.
+        num_bases: Basis decomposition rank for R-GCN weight sharing.
+        num_layers: Number of R-GCN message-passing layers.
         num_heads: Cross-attention heads.
-        dropout: Attention dropout.
+        dropout: Dropout rate (applied after each R-GCN layer and inside attention).
     """
 
-    def __init__(self, encoder: nn.Module, hidden_dim: int, num_heads: int = 4, dropout: float = 0.1) -> None:
+    def __init__(
+        self,
+        num_nodes: int,
+        num_relations: int,
+        hidden_dim: int,
+        num_bases: int = 10,
+        num_layers: int = 2,
+        num_heads: int = 4,
+        dropout: float = 0.2,
+    ) -> None:
         super().__init__()
-        self.encoder = encoder
+        self.node_emb = nn.Embedding(num_nodes, hidden_dim)
+        nn.init.xavier_uniform_(self.node_emb.weight)
+
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        for _ in range(num_layers):
+            self.convs.append(
+                RGCNConv(hidden_dim, hidden_dim, num_relations=num_relations, num_bases=num_bases)
+            )
+            self.norms.append(nn.LayerNorm(hidden_dim))
+
         self.cross_attn = DrugConditionedCrossAttention(hidden_dim, num_heads, dropout)
+        self.dropout = dropout
 
     def encode(self, edge_index: torch.Tensor, edge_type: torch.Tensor) -> torch.Tensor:
-        """Run the R-GCN encoder."""
-        return self.encoder(edge_index, edge_type)
+        """Full-graph R-GCN forward pass.
+
+        Args:
+            edge_index: (2, num_edges) COO edge indices.
+            edge_type: (num_edges,) relation type per edge.
+
+        Returns:
+            Node embeddings of shape (num_nodes, hidden_dim).
+        """
+        x = self.node_emb.weight
+        for conv, norm in zip(self.convs, self.norms):
+            residual = x
+            x = conv(x, edge_index, edge_type)
+            x = norm(x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            x = x + residual
+        return x
 
     def score(
         self,

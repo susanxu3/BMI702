@@ -66,33 +66,28 @@ def per_disease_auroc(
     return float(roc_auc_score(labels, scores))
 
 
-def balanced_auprc(
-    scores: np.ndarray,
-    true_drug_indices: set[int],
-    all_drug_indices: np.ndarray,
-    rng: np.random.Generator | None = None,
+def per_disease_auprc(
+    scores: np.ndarray, true_drug_indices: set[int], all_drug_indices: np.ndarray
 ) -> float | None:
-    """Balanced 1:1 AUPRC — sample equal negatives per disease.
+    """Full-library AUPRC for a single disease (imbalanced, macro-averaging ready).
+
+    Mirrors `per_disease_auroc` — computes AP over all 7957 drugs per disease so
+    the caller can macro-average across diseases. This is the "honest" per-task
+    AUPRC; pair it with a TxGNN-style pooled 1:1 balanced number in the caller
+    if you want comparability with the TxGNN paper.
 
     Args:
-        scores: Predicted scores for all drugs.
+        scores: Predicted scores for all drugs (aligned with all_drug_indices).
         true_drug_indices: Set of ground-truth drug indices.
         all_drug_indices: Array of all drug node indices.
-        rng: Random generator for reproducible sampling.
 
     Returns:
-        AUPRC or None if not enough negatives.
+        AUPRC or None if no positives.
     """
-    if rng is None:
-        rng = np.random.default_rng(42)
     labels = np.array([1 if d in true_drug_indices else 0 for d in all_drug_indices])
-    pos_idx = np.where(labels == 1)[0]
-    neg_idx = np.where(labels == 0)[0]
-    if len(pos_idx) == 0 or len(neg_idx) < len(pos_idx):
+    if labels.sum() == 0:
         return None
-    sampled_neg = rng.choice(neg_idx, size=len(pos_idx), replace=False)
-    sel = np.concatenate([pos_idx, sampled_neg])
-    return float(average_precision_score(labels[sel], scores[sel]))
+    return float(average_precision_score(labels, scores))
 
 
 def main() -> None:

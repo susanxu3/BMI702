@@ -23,7 +23,6 @@ from src.data.primekg_loader import build_pyg_graph, load_primekg
 from src.data.disease_split import load_split
 from src.evaluation.metrics import recall_at_k, reciprocal_rank
 from src.models.cross_attention_scorer import PhenoDrugModel
-from src.models.rgcn_encoder import RGCNEncoder
 from src.utils.negative_sampling import DegreeWeightedSampler
 
 
