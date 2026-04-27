@@ -552,6 +552,7 @@ def run_late_fusion_experiment(config: dict) -> dict:
 
     try:
         model.load_state_dict(state_dict, strict=True)
+        print("Model loaded successfully with strict=True")
     except RuntimeError as e:
         # Helpful context for the most common failure: layer-count mismatch.
         logger.error(

@@ -643,7 +643,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--tier", type=str, default="tier2",
-        choices=["tier1", "tier2", "gpt4o"],
+        choices=["tier1", "tier2", "gpt4o", "hybrid"],
         help="Description tier",
     )
     parser.add_argument(

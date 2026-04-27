@@ -309,10 +309,25 @@ def enrich_with_llm(
     if output_path and output_path.exists():
         with open(output_path) as f:
             enriched = json.load(f)
-        logger.info(f"Resuming from {len(enriched)} existing enrichments")
+        n_failed = sum(1 for v in enriched.values() if "_error" in v)
+        n_ok = len(enriched) - n_failed
+        logger.info(
+            f"Resuming: {n_ok} successful enrichments, "
+            f"{n_failed} previously failed (will retry)"
+        )
+
+    # Treat entries with _error (or with text equal to the tier2 fallback) as
+    # not done, so a re-run after topping up the API quota actually retries them.
+    def _needs_retry(node_idx: int, existing: dict | None) -> bool:
+        if existing is None:
+            return True
+        if "_error" in existing:
+            return True
+        return False
 
     remaining = {
-        k: v for k, v in descriptions.items() if str(k) not in enriched
+        k: v for k, v in descriptions.items()
+        if _needs_retry(k, enriched.get(str(k)))
     }
     items = list(remaining.items())
     logger.info(f"Enriching {len(items)} {entity_type}s with {model}")
@@ -348,7 +363,8 @@ def enrich_with_llm(
                         logger.error(f"Skipping {entity_type} {node_idx} after {max_retries} failures")
                         enriched[str(node_idx)] = {
                             "name": desc["name"],
-                            "text": desc["text"],  # fallback to Tier 2
+                            "text": desc["text"],   # tier2 fallback so eval doesn't crash
+                            "_error": str(e),       # marks the row for retry on next run
                         }
 
         # Save intermediate results
