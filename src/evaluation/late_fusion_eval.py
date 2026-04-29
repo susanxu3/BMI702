@@ -284,34 +284,26 @@ def _stratify_diseases_by_coldstart(
     return strata
 
 
-# ── Evaluate a single beta value ─────────────────────────────────────────
-def evaluate_single_beta(
-    graph_scores: dict[int, np.ndarray],
-    llm_scores: dict[int, np.ndarray],
-    disease_to_true_drugs: dict[int, list[int]],
+# ── Compute the full metric set from a per-disease scores dict ───────────
+def compute_test_metrics(
+    scores_dict: dict[int, np.ndarray],
+    true_drugs_dict: dict[int, list[int]] | dict[int, set[int]],
     drug_indices_arr: np.ndarray,
-    beta: float,
-    normalize: str = "minmax",
     train_pairs: pd.DataFrame | None = None,
 ) -> dict[str, float]:
-    """Evaluate fused scores at a given beta on a set of diseases.
+    """Compute the late-fusion metric set from a generic per-disease scores dict.
 
-    Per-disease evaluation:
-    1. Normalize both score arrays independently.
-    2. Fuse: s_fused = beta * s_graph_norm + (1-beta) * s_llm_norm.
-    3. Rank drugs by descending fused score.
-    4. Compute MRR, R@K, full-library per-disease AUROC/AUPRC (macro).
-    5. Accumulate 1:1 balanced (label, score) pairs per disease -> pooled micro
-       AUROC/AUPRC (TxGNN-style; matches src/pagerank & new model.ipynb).
-    6. Cold-start stratification if train_pairs provided.
+    Shared core called by both `evaluate_single_beta` (after fusing graph + LLM
+    scores) and `feature_fusion_train.evaluate_fusion_model` (after a single
+    forward pass with fused embeddings). Keeping the metric semantics identical
+    here means the wandb dashboards across phases are directly comparable.
 
     Args:
-        graph_scores: disease_idx -> (num_drugs,) graph scores.
-        llm_scores: disease_idx -> (num_drugs,) text cosine sims.
-        disease_to_true_drugs: disease_idx -> list of true drug indices.
-        drug_indices_arr: Sorted array of all drug node indices.
-        beta: Mixing weight.
-        normalize: Normalization method ('minmax' or 'rank').
+        scores_dict: disease_idx -> (num_drugs,) score array (already fused /
+            ranked-equivalent — no further normalization is applied here).
+        true_drugs_dict: disease_idx -> iterable of true drug indices.
+        drug_indices_arr: Sorted array of all drug node indices (must align
+            with the ordering of values in `scores_dict`).
         train_pairs: If provided, enables cold-start stratification.
 
     Returns:
@@ -319,10 +311,7 @@ def evaluate_single_beta(
         AUPRC (full-library macro), AUROC_balanced_micro,
         AUPRC_balanced_micro, and optionally MRR_seen_all/_some/_none.
     """
-    diseases = sorted(
-        set(graph_scores.keys()) & set(llm_scores.keys())
-        & set(disease_to_true_drugs.keys())
-    )
+    diseases = sorted(set(scores_dict.keys()) & set(true_drugs_dict.keys()))
 
     rng = np.random.default_rng(42)
     per_disease_results: list[dict] = []
@@ -330,46 +319,26 @@ def evaluate_single_beta(
     pooled_scores: list[float] = []
 
     for d_idx in diseases:
-        s_graph = graph_scores[d_idx]
-        s_llm = llm_scores[d_idx]
-        true_drugs = disease_to_true_drugs[d_idx]
-
+        s = scores_dict[d_idx]
+        true_drugs = list(true_drugs_dict[d_idx])
         if not true_drugs:
             continue
 
-        # 1. Normalize
-        s_g_norm = normalize_scores(s_graph, method=normalize)
-        s_l_norm = normalize_scores(s_llm, method=normalize)
-
-        # 2. Fuse
-        s_fused = beta * s_g_norm + (1 - beta) * s_l_norm
-
-        # 3. Rank
-        ranked_order = np.argsort(-s_fused)
+        ranked_order = np.argsort(-s)
         ranked_drugs = drug_indices_arr[ranked_order].tolist()
         true_drug_set = set(true_drugs)
 
-        # 4. Metrics (full-library, per-disease)
-        mrr = reciprocal_rank(ranked_drugs, true_drugs)
-        r1 = recall_at_k(ranked_drugs, true_drugs, 1)
-        r5 = recall_at_k(ranked_drugs, true_drugs, 5)
-        r10 = recall_at_k(ranked_drugs, true_drugs, 10)
-        r50 = recall_at_k(ranked_drugs, true_drugs, 50)
-        auroc = per_disease_auroc(s_fused, true_drug_set, drug_indices_arr)
-        auprc = per_disease_auprc(s_fused, true_drug_set, drug_indices_arr)
-
         per_disease_results.append({
             "disease_idx": d_idx,
-            "MRR": mrr,
-            "R@1": r1,
-            "R@5": r5,
-            "R@10": r10,
-            "R@50": r50,
-            "AUROC": auroc,
-            "AUPRC": auprc,
+            "MRR": reciprocal_rank(ranked_drugs, true_drugs),
+            "R@1": recall_at_k(ranked_drugs, true_drugs, 1),
+            "R@5": recall_at_k(ranked_drugs, true_drugs, 5),
+            "R@10": recall_at_k(ranked_drugs, true_drugs, 10),
+            "R@50": recall_at_k(ranked_drugs, true_drugs, 50),
+            "AUROC": per_disease_auroc(s, true_drug_set, drug_indices_arr),
+            "AUPRC": per_disease_auprc(s, true_drug_set, drug_indices_arr),
         })
 
-        # 5. TxGNN-style pooled 1:1 balanced collection
         pos_mask = np.fromiter(
             (d in true_drug_set for d in drug_indices_arr),
             dtype=bool,
@@ -382,7 +351,7 @@ def evaluate_single_beta(
             sampled_neg = rng.choice(neg_pos, size=n_pos, replace=False)
             pooled_labels.extend([1] * n_pos + [0] * n_pos)
             pooled_scores.extend(
-                s_fused[pos_pos].tolist() + s_fused[sampled_neg].tolist()
+                s[pos_pos].tolist() + s[sampled_neg].tolist()
             )
 
     if not per_disease_results:
@@ -390,8 +359,7 @@ def evaluate_single_beta(
                 "R@50": 0.0, "AUROC": 0.0, "AUPRC": 0.0,
                 "AUROC_balanced_micro": 0.0, "AUPRC_balanced_micro": 0.0}
 
-    # 6. Macro-average (full-library per-disease)
-    metrics = {}
+    metrics: dict[str, float] = {}
     for key in ["MRR", "R@1", "R@5", "R@10", "R@50"]:
         metrics[key] = float(np.mean([r[key] for r in per_disease_results]))
 
@@ -400,7 +368,6 @@ def evaluate_single_beta(
     metrics["AUROC"] = float(np.mean(auroc_vals)) if auroc_vals else 0.0
     metrics["AUPRC"] = float(np.mean(auprc_vals)) if auprc_vals else 0.0
 
-    # 7. TxGNN-style pooled micro (1:1 balanced, single AP/AUROC over pool)
     if pooled_labels:
         metrics["AUROC_balanced_micro"] = float(
             roc_auc_score(pooled_labels, pooled_scores)
@@ -412,30 +379,76 @@ def evaluate_single_beta(
         metrics["AUROC_balanced_micro"] = 0.0
         metrics["AUPRC_balanced_micro"] = 0.0
 
-    # 6. Cold-start stratification
     if train_pairs is not None:
         drug_degree = _build_drug_degree(train_pairs)
         disease_list = [r["disease_idx"] for r in per_disease_results]
-        disease_to_true = {
-            d: disease_to_true_drugs[d] for d in disease_list
-        }
-        strata = _stratify_diseases_by_coldstart(disease_to_true, drug_degree, disease_list)
-
+        disease_to_true = {d: list(true_drugs_dict[d]) for d in disease_list}
+        strata = _stratify_diseases_by_coldstart(
+            disease_to_true, drug_degree, disease_list
+        )
         mrr_by_disease = {r["disease_idx"]: r["MRR"] for r in per_disease_results}
-
         for stratum_name, stratum_diseases in strata.items():
             if stratum_diseases:
                 stratum_mrrs = [mrr_by_disease[d] for d in stratum_diseases]
                 metrics[f"MRR_seen_{stratum_name}"] = float(np.mean(stratum_mrrs))
             else:
                 metrics[f"MRR_seen_{stratum_name}"] = 0.0
-
         logger.info(
             f"Cold-start strata: all={len(strata['all'])}, "
             f"some={len(strata['some'])}, none={len(strata['none'])}"
         )
 
     return metrics
+
+
+# ── Evaluate a single beta value ─────────────────────────────────────────
+def evaluate_single_beta(
+    graph_scores: dict[int, np.ndarray],
+    llm_scores: dict[int, np.ndarray],
+    disease_to_true_drugs: dict[int, list[int]],
+    drug_indices_arr: np.ndarray,
+    beta: float,
+    normalize: str = "minmax",
+    train_pairs: pd.DataFrame | None = None,
+) -> dict[str, float]:
+    """Evaluate fused scores at a given beta on a set of diseases.
+
+    Normalizes graph and LLM scores per disease, fuses them with weight beta,
+    then delegates the metric computation to `compute_test_metrics` so the
+    metric set is bit-identical to the feature-level fusion path.
+
+    Args:
+        graph_scores: disease_idx -> (num_drugs,) graph scores.
+        llm_scores: disease_idx -> (num_drugs,) text cosine sims.
+        disease_to_true_drugs: disease_idx -> list of true drug indices.
+        drug_indices_arr: Sorted array of all drug node indices.
+        beta: Mixing weight.
+        normalize: Normalization method ('minmax' or 'rank').
+        train_pairs: If provided, enables cold-start stratification.
+
+    Returns:
+        Dict matching `compute_test_metrics`.
+    """
+    diseases = sorted(
+        set(graph_scores.keys()) & set(llm_scores.keys())
+        & set(disease_to_true_drugs.keys())
+    )
+
+    fused_scores: dict[int, np.ndarray] = {}
+    for d_idx in diseases:
+        true_drugs = disease_to_true_drugs[d_idx]
+        if not true_drugs:
+            continue
+        s_g_norm = normalize_scores(graph_scores[d_idx], method=normalize)
+        s_l_norm = normalize_scores(llm_scores[d_idx], method=normalize)
+        fused_scores[d_idx] = beta * s_g_norm + (1 - beta) * s_l_norm
+
+    return compute_test_metrics(
+        scores_dict=fused_scores,
+        true_drugs_dict=disease_to_true_drugs,
+        drug_indices_arr=drug_indices_arr,
+        train_pairs=train_pairs,
+    )
 
 
 # ── Top-level experiment runner ──────────────────────────────────────────
