@@ -165,6 +165,69 @@ class AutoencoderFusion(nn.Module):
         return F.mse_loss(reconstructed, h_concat)
 
 
+class ResidualAutoencoderFusion(nn.Module):
+    """Residual autoencoder fusion.
+
+    Instead of replacing the graph embedding with a bottleneck latent directly,
+    this module predicts an additive correction from the concatenated
+    graph + text features:
+
+        h_fused = h_graph + delta([h_graph ; h_llm])
+
+    The decoder still reconstructs the concatenated input from the residual
+    code so Phase 1 remains directly comparable to the original AE pipeline.
+
+    Args:
+        input_dim: Concatenated input dimension (graph_dim + text_dim).
+        hidden_dim: Intermediate encoder layer dimension.
+        latent_dim: Residual code dimension. Must match graph_dim for the
+            additive residual connection.
+    """
+
+    def __init__(
+        self,
+        input_dim: int = 256,
+        hidden_dim: int = 256,
+        latent_dim: int = 128,
+    ) -> None:
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, latent_dim),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, input_dim),
+        )
+
+    def forward(self, h_graph: torch.Tensor, h_llm: torch.Tensor) -> torch.Tensor:
+        """Predict a residual correction over the graph embedding."""
+        h_concat = torch.cat([h_graph, h_llm], dim=-1)
+        delta = self.encoder(h_concat)
+        if delta.shape[-1] != h_graph.shape[-1]:
+            raise ValueError(
+                f"Residual code dim {delta.shape[-1]} must match graph dim "
+                f"{h_graph.shape[-1]} for additive fusion."
+            )
+        return h_graph + delta
+
+    def reconstruct(self, h_graph: torch.Tensor, h_llm: torch.Tensor) -> torch.Tensor:
+        """Decode the residual code back to the concatenated input."""
+        h_concat = torch.cat([h_graph, h_llm], dim=-1)
+        delta = self.encoder(h_concat)
+        return self.decoder(delta)
+
+    def reconstruction_loss(
+        self, h_graph: torch.Tensor, h_llm: torch.Tensor
+    ) -> torch.Tensor:
+        """MSE reconstruction loss for residual-fusion pretraining."""
+        h_concat = torch.cat([h_graph, h_llm], dim=-1)
+        reconstructed = self.reconstruct(h_graph, h_llm)
+        return F.mse_loss(reconstructed, h_concat)
+
+
 class LateFusion:
     """Late fusion baseline (Section 5.2.1, Method 1): no retraining.
 
