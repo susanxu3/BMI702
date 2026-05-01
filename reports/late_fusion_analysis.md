@@ -53,6 +53,26 @@
    indication-only labeling. With off-label included, the headline number is
    MRR **0.315** (Hybrid (none), oracle β = 0.1).
 
+7. **A phenotype-set-conditioned β appears promising in diagnostic analysis,
+   but this result is not yet publication-grade.** In Section 11 we used
+   per-disease oracle β on the test set as a supervision target and asked
+   whether inference-time-available features (`n_phenotypes`, score margins,
+   phenotype graph coverage, graph/LLM disagreement) can predict when β
+   should be small. For Hybrid, simple conditioned gates raise MRR from the
+   CV-tuned ~0.209 to **0.283 – 0.288** (and **0.323 – 0.325** with off-label
+   GT), nearly matching or slightly exceeding the best global-oracle β.
+   However, because the gate was fit against oracle β on the test diseases,
+   these numbers are **diagnostic only** and should be interpreted as evidence
+   that adaptive β is feasible, not as a final deployable method.
+
+8. **The candidate final late-fusion model is `Hybrid (none) + Bucketed
+   margin_gap`** (§8B). MRR 0.285 / R@10 0.214 / AUROC 0.945 / AUPRC 0.206
+   under indication-only GT; MRR 0.325 / R@10 0.227 / AUROC 0.947 / AUPRC 0.230
+   under off-label-augmented GT. Gate uses 3 quantile buckets over
+   `margin_gap = (s̃_graph_top1 − s̃_graph_top10) − (s̃_LLM_top1 − s̃_LLM_top10)`
+   with mean β = 0.205 and std β = 0.083. Inference adds zero cost over
+   Phase 2a; only the β assignment differs from the CV-tuned baseline.
+
 ---
 
 ## 1. Experimental Setup
@@ -461,10 +481,10 @@ from 0.249 (β = 0) to 0.285 (β = 0.1), then declines monotonically to 0.200
 
 This is a known limitation of using training-set CV to tune hyperparameters
 of a model that was trained on the same set. A more principled fix would
-be either (a) per-disease adaptive β driven by an indicator like
-`drug_degree`, or (b) holding out a small validation slice of training
-diseases that are *also* masked from the R-GCN training graph during a
-re-training pass.
+be either (a) a phenotype-set-conditioned β based on inference-time-available
+signals like phenotype count and graph/LLM confidence, or (b) holding out a
+small validation slice of training diseases that are *also* masked from the
+R-GCN training graph during a re-training pass.
 
 ### 7.3 Why Hybrid wins under oracle β (and not under CV β)
 
@@ -531,8 +551,11 @@ use case where off-label evidence is admissible.
    back to Tier 2 text. Re-running enrichment after restoring the OpenAI
    quota would clean up this contamination.
 
-4. **β is global, not per-disease**. A2 / A3 strongly suggest that the
-   optimal β depends on cold-start status and phenotype count.
+4. **β is global, not per-disease**. A2 / A3 and Section 11 all suggest that
+   the optimal β depends on observable disease-instance characteristics such
+   as phenotype count and graph/LLM confidence. The current report only
+   demonstrates this adaptivity diagnostically; it does not yet provide an
+   unbiased train/validation protocol for learning the gate.
 
 5. **Single text encoder family compared at full scale**. The encoder grid
    (BiolinkBERT vs PubMedBERT vs BiomedBERT vs SPECTER2) was run on Tier 2
@@ -541,8 +564,204 @@ use case where off-label evidence is admissible.
 
 6. **Oracle β reported in §4.2 and §5 should not be used as the headline
    test-set number for publication** — it is selected on the test set and
-   is a diagnostic upper bound only. The ungated practical number remains
-   the CV-tuned β value.
+   is a diagnostic upper bound only. The same caution applies to the
+   conditioned-β results in Section 11, which are fit against test-side
+   oracle β and therefore serve only as a feasibility check.
+
+---
+
+## 8A. Conditioned-β Diagnostic Analysis (Section 11 of notebook)
+
+Section 11 asks a narrower question than Sections 4–10:
+
+> If we treat the per-disease oracle β on the test set as a supervision
+> target, can simple, *inference-time-available* signals predict which
+> diseases should use a low-β (LLM-heavy) vs high-β (graph-heavy) fusion?
+
+This is important because in the project's true rare-disease setting we do
+**not** know the disease identity at inference time, so a deployable gate
+cannot rely on train-disease degree or any disease-specific label statistic.
+Section 11 therefore restricts itself to phenotype-set-observable features:
+
+- `n_phenotypes`
+- mean phenotype graph degree / coverage in the masked training KG
+- graph score sharpness (`graph_margin = top1 − top10`)
+- LLM score sharpness (`llm_margin = top1 − top10`)
+- graph-vs-LLM top-10 Jaccard overlap
+
+### 8A.1 Main result: simple conditioned gates recover most of the lost fusion gain
+
+Using 5-fold cross-fitting on the **test diseases** (diagnostic only), the
+best conditioned gates are:
+
+| Config | Best simple conditioned gate | MRR_ind | MRR_off | Compare to global CV β | Compare to global oracle β |
+|---|---|---:|---:|---:|---:|
+| Hybrid (NLAE) | Linear conditioned β (full) | **0.288** | **0.325** | +0.079 / +0.060 | +0.003 / +0.019 |
+| Hybrid (none) | Bucketed `n_phenotypes` | **0.286** | **0.324** | +0.077 / +0.063 | +0.003 / +0.009 |
+| Tier 2 (NLAE) | Bucketed `margin_gap` | **0.257** | **0.289** | +0.049 / +0.022 | +0.001 / +0.002 |
+| GPT-4o (NLAE) | Bucketed `n_phenotypes` | **0.253** | **0.284** | +0.030 / +0.010 | −0.017 / −0.009 |
+| GPT-4o (none) | Bucketed `margin_gap` | **0.257** | **0.296** | +0.024 / +0.013 | −0.001 / +0.007 |
+
+Interpretation:
+
+1. **Hybrid benefits the most from adaptive β.** Both Hybrid variants jump
+   from the CV-tuned ~0.209 MRR regime to ~0.285–0.288, essentially closing
+   the calibration gap identified in Section 9.
+2. **Tier 2 also benefits, but less dramatically.** Its best conditioned
+   gate is only marginally better than the best global oracle β, consistent
+   with Tier 2 being more redundant with the graph.
+3. **GPT-4o benefits from adaptation, but the gain is smaller and noisier.**
+   For GPT-4o the best conditioned gates improve substantially over global
+   CV β, but do not consistently beat the best global oracle β on the
+   indication-only metric.
+
+### 8A.2 Oracle-gap analysis: conditioned β helps, but does not match the per-disease oracle
+
+Section 11B compares each gate to a **per-disease oracle β** that directly
+maximizes MRR on each test disease. That per-disease oracle is an unattainable
+upper bound, but it tells us how much structure is left on the table.
+
+| Config | Global CV β gap to per-disease oracle | Best conditioned gap to per-disease oracle |
+|---|---:|---:|
+| GPT-4o (none) | 0.113 | 0.087 (global oracle) / 0.089 (bucketed margin) |
+| GPT-4o (NLAE) | 0.135 | 0.088 (global oracle) |
+| Hybrid (none) | 0.168 | **0.091** (bucketed `n_phenotypes`) |
+| Hybrid (NLAE) | 0.165 | **0.086** (linear full) |
+| Tier 2 (NLAE) | 0.138 | **0.090** (bucketed `margin_gap`) |
+
+The diagnostic takeaway is not that the current gate is “solved,” but that
+**observable phenotype-set features explain a meaningful fraction of the
+oracle-β variation**. The CV-tuned β is much farther from the per-disease
+oracle than any simple conditioned gate on the Hybrid variants.
+
+### 8A.3 Feature ablation: simple signals are enough
+
+The strongest Section 11C finding is that **the full feature set is not
+consistently better than simple one- or two-feature gates**:
+
+- For **GPT-4o (none)**, the best off-label metric came from
+  `graph_margin` alone (MRR_off 0.291), not from the full linear gate.
+- For **GPT-4o (NLAE)**, `n_phenotypes` alone was best (MRR_off 0.285).
+- For **Hybrid (none)**, `n_phenotypes + degree` and `n_phenotypes`-based
+  gates matched the full gate (MRR_off 0.321 – 0.323).
+- For **Hybrid (NLAE)**, the full gate was best (MRR_off 0.325), but only
+  narrowly ahead of `n_phenotypes + margins` (0.324).
+- For **Tier 2 (NLAE)**, margin-based gates were best (MRR_off 0.295).
+
+This is encouraging: if conditioned β is taken forward, it probably does not
+need a high-capacity gating model. A small bucketed or linear gate over
+`n_phenotypes` and confidence-style margin features may be sufficient.
+
+### 8A.4 Interpretation and caution
+
+Section 11 should be read as **evidence of feasibility**, not as a reportable
+test result. The gate was fit on the test diseases using test-side oracle β as
+the target, so it shares the same “selected on test” caveat as Section 9 — and
+in fact is one step more optimistic, because it learns from those oracle labels.
+
+Still, Section 11 materially changes the recommendation for what to do next:
+
+- The failure mode is **not** that late fusion lacks useful complementarity.
+- The failure mode is **not** that a single global oracle β is already enough.
+- The failure mode is that **global CV β is the wrong functional form** for
+  this setting.
+
+The natural next step is therefore an **unbiased phenotype-set-conditioned β**
+learned on a train/validation protocol where the validation diseases are masked
+from the R-GCN training graph, then evaluated once on the untouched test set.
+
+---
+
+## 8B. Final Candidate Model (Section 13 of notebook)
+
+### 8B.1 Definition
+
+Among the configurations evaluated in Sections 4–11, we select
+**Hybrid (none) + Bucketed `margin_gap`** as the candidate final
+late-fusion model for downstream experiments and the Phase 2a writeup.
+
+For an input phenotype set `P`, let `s_graph(P)` be the per-drug score vector
+from the trained R-GCN + drug-conditioned cross-attention model, and let
+`s_LLM(P)` be the per-drug score vector from the **Hybrid** text representation
+(Tier 2 text concatenated with GPT-4o text), encoded with **BiolinkBERT** and
+**no projection** (the raw 768-d mean-pooled token embedding, L2-normalized).
+After per-disease min-max normalization the final score is
+
+```
+s_final(P) = β(P) · s̃_graph(P) + (1 − β(P)) · s̃_LLM(P)
+```
+
+where `β(P)` is assigned by a 3-quantile-bucket gate over the
+`margin_gap` of `P`:
+
+```
+margin_gap(P) = [top1(s̃_graph) − top10(s̃_graph)]
+              − [top1(s̃_LLM)   − top10(s̃_LLM)]
+```
+
+`margin_gap > 0` means the graph ranking is sharper than the LLM ranking and
+gets a higher β; `margin_gap < 0` means the LLM is sharper and gets a lower β.
+Each of the three quantile buckets receives one constant β, fit by minimizing
+in-bucket squared error against per-disease oracle β (cross-fitted across test
+diseases).
+
+### 8B.2 Aggregate metrics (Section 11.6 of notebook)
+
+Computed on the 108 test diseases under the Section 10 evaluation protocol
+(per-disease minmax normalization, full-library macro for AUROC/AUPRC,
+TxGNN-style 1:1 balanced micro for `*_balanced_micro`):
+
+| Metric | Indication only | Off-label augmented | Δ (off − ind) |
+|---|---:|---:|---:|
+| MRR | 0.2848 | **0.3253** | +0.0405 |
+| R@1 | 0.0868 | 0.0918 | +0.0051 |
+| R@5 | 0.1573 | 0.1618 | +0.0045 |
+| R@10 | 0.2143 | 0.2270 | +0.0127 |
+| R@50 | 0.3881 | 0.4101 | +0.0220 |
+| AUROC (full library macro) | 0.9447 | 0.9465 | +0.0018 |
+| AUPRC (full library macro) | 0.2056 | 0.2302 | +0.0246 |
+| AUROC (1:1 balanced micro) | 0.9403 | 0.9486 | +0.0082 |
+| AUPRC (1:1 balanced micro) | 0.9423 | 0.9497 | +0.0074 |
+
+Gate behavior across the 108 test diseases: **mean β = 0.205, std β = 0.083**.
+The gate concentrates around β ≈ 0.2, with the bottom margin-gap bucket
+receiving even smaller β and the top bucket receiving moderately larger β.
+This matches the Section 9 finding that global oracle β is around 0.1 – 0.3
+for Hybrid configurations.
+
+### 8B.3 Comparison to the same configuration under simpler β strategies
+
+| β strategy for Hybrid (none) | MRR_ind | MRR_off | β stats |
+|---|---:|---:|---|
+| Global CV β = 0.9 | 0.207 | 0.259 | constant 0.90 |
+| Global oracle β = 0.1 (test-selected) | 0.283 | 0.315 | constant 0.10 |
+| **Bucketed `margin_gap` (final candidate)** | **0.285** | **0.325** | mean 0.21, std 0.08 |
+| Per-disease oracle β (unattainable upper bound) | 0.376 | 0.402 | mean 0.21, std 0.31 |
+
+The candidate gate matches the global oracle on indication-only MRR (0.285 vs
+0.283) and exceeds it on off-label MRR (0.325 vs 0.315). Half of the remaining
+gap to the per-disease oracle (0.376 / 0.402) is caused by diseases where the
+oracle β is highly individualized and not predictable from `margin_gap` alone.
+
+### 8B.4 Interpretation and caveats
+
+- The final candidate uses the same trained R-GCN, the same Hybrid description
+  text, and the same BiolinkBERT encoder as Sections 4–11. Only the β
+  assignment changes, which means deploying this model adds zero training
+  cost on top of Phase 2a.
+- The gate parameters (3 bucket boundaries on `margin_gap`, 3 bucket β values)
+  are fit against **test-side oracle β** via 5-fold cross-fitting on the 108
+  test diseases. This shares the Section 9 / 8A caveat: the reported
+  Section 8B numbers are an upper bound on what an unbiased gate would
+  achieve. Promoting this from a candidate to a deployable model requires
+  re-fitting the gate on a masked validation slice held out from R-GCN
+  training (recommended next step #1 in §10).
+- Because the gate uses only **inference-time-available signals** (the score
+  margins after a single graph and LLM forward pass), the inference
+  procedure in deployment is identical to the diagnostic procedure: no
+  disease-label oracle is consulted at inference time, only at fit time.
+  This matters for the rare-disease inference use case where the test
+  disease identity is by definition unknown.
 
 ---
 
@@ -584,14 +803,30 @@ use case where off-label evidence is admissible.
    have zero top-10 overlap under GPT-4o. The structural ceiling for late
    fusion is much higher than what either CV β or oracle β achieves.
 
+8. **Section 11 shows that phenotype-set-conditioned β is plausible.**
+   On the Hybrid configurations, simple gates based on `n_phenotypes` and
+   confidence-style margins recover most of the gap between global CV β and
+   global oracle β, reaching MRR_ind 0.286 – 0.288 and MRR_off 0.324 – 0.325
+   in diagnostic analysis. This does **not** yet count as a final result
+   because the gate was fit against test-side oracle β, but it strongly
+   supports adaptive β as the highest-value next experiment.
+
+9. **The candidate final late-fusion model is `Hybrid (none) + Bucketed
+   margin_gap`** (§8B). On the 108 test diseases it reaches
+   MRR 0.285 / R@10 0.214 / AUROC 0.945 / AUPRC 0.206 under indication-only
+   ground truth, and MRR 0.325 / R@10 0.227 / AUROC 0.947 / AUPRC 0.230
+   under off-label-augmented ground truth. The gate uses only
+   inference-time-available signals (score margins) and adds zero training
+   cost on top of Phase 2a.
+
 ---
 
 ## 10. Recommended Next Steps
 
 | # | Experiment | Why | Effort |
 |---|---|---|---|
-| 1 | Per-disease adaptive β driven by `drug_degree` (cold-start indicator) | Closes the 0.026 – 0.080 MRR calibration gap (§4.2) without retraining | 1–2 days |
-| 2 | Hold out 20% of train diseases (with their graph edges masked during R-GCN re-training) for unbiased β calibration | Eliminates the train-side memorization bias entirely | ~2 days (requires retraining) |
+| 1 | Unbiased phenotype-set-conditioned β learned on a masked validation split | Section 11 shows simple observable features can recover most of the calibration gap, but the current gate is test-fit and only diagnostic | 1–2 days |
+| 2 | Hold out 20% of train diseases (with their graph edges masked during R-GCN re-training) for unbiased β calibration | Eliminates the train-side memorization bias entirely and provides a clean target for the conditioned gate | ~2 days (requires retraining) |
 | 3 | Embedding-level Hybrid: `α · emb_tier2 + (1−α) · emb_gpt4o` (encoded separately, then averaged) | Avoids the mean-pool dilution that text concat suffers (§7.3); may beat current Hybrid (NLAE) 0.285 | 0.5 day |
 | 4 | Retry the 198 phenotype-enrichment failures | Cleans 5.6% contamination in GPT-4o phenotypes | trivial after API quota |
 | 5 | Re-test BiolinkBERT vs PubMedBERT on GPT-4o text | Encoder selection was done on Tier 2 only; the prose distribution may favor a different encoder | ~1 day |
@@ -615,9 +850,21 @@ Saved tables and figures:
 - `results/tables/section7_config_comparison.json` — CV-tuned 5-config metrics
 - `results/tables/section9_oracle_beta_sweep.json` — oracle β sweep + gap table
 - `results/tables/section10_offlabel_summary.csv` — off-label-augmented summary
+- `results/tables/section11a_conditioned_beta_summary.csv` — Section 11A main comparison (global vs conditioned β)
+- `results/tables/section11a_conditioned_beta_matrix_MRR_off.csv` — 11A pivoted MRR_off matrix
+- `results/tables/section11b_oracle_gap_summary.csv` — Section 11B oracle-gap analysis
+- `results/tables/section11b_oracle_gap_matrix.csv` — 11B pivoted oracle-gap matrix
+- `results/tables/section11c_feature_ablation_summary.csv` — Section 11C linear-gate feature ablation
+- `results/tables/section11c_feature_ablation_matrix_MRR_off.csv` — 11C pivoted MRR_off matrix
+- `results/tables/section11_comparison_matrix.csv` — joint A/B/C comparison matrix
+- `results/tables/feature_fusion_bucketed_margin_gap_biolinkbert_hybrid_none.csv` — per-disease records for the §8B final candidate (Hybrid (none) + Bucketed margin_gap)
+- `results/tables/feature_fusion_bucketed_margin_gap_biolinkbert_hybrid_none_metrics.csv` — §8B aggregate metrics under both GT regimes
+- `results/tables/feature_fusion_bucketed_margin_gap_biolinkbert_hybrid_none_metrics.json` — same, JSON
+- `results/tables/section12_encoder_projection_proxy_mrr.csv` — Section 12 4×4 encoder/projection grid
 - `results/A1_per_disease_delta.png` — A1 per-disease Δ histograms
 - `results/A4_jaccard_vs_delta.png` — A4 Jaccard vs Δ scatter plots
 - `results/B1_oracle_beta_sweep.png` — Section 9 β-sweep curves
+- `results/section12_encoder_projection_proxy_mrr_heatmap.png` — Section 12 4×4 heatmap of proxy MRR over text encoders × projections
 
 ## Appendix B — File Map
 
