@@ -1,0 +1,9 @@
+model,group,n,MRR,R@1,R@5,R@10,R@50
+TxGNN Oracle Disease Input,Upper bound,108,0.403963,0.133155,0.280378,0.357819,0.672698
+PageRank,Baseline,108,0.102824,0.012963,0.046003,0.056049,0.156127
+PubCaseFinder → TxGNN Cascade,Cascade baseline,108,0.312,0.1229,0.2723,0.2916,0.3161
+GPT-3.5,LLM baseline / possible leakage,108,0.320423,0.070626,0.161968,0.236266,0.530842
+R-GCN + Cross-Attention,Proposed model,108,0.254,0.055,0.135,0.187,0.359
+R-GCN + LLM (Feature-Level Fusion),LLM fusion,108,0.256338,0.055221,0.135929,0.188222,0.366308
+R-GCN + LLM (Scoring-Level Fusion),LLM fusion,108,0.325251,0.091837,0.161847,0.226994,0.410092
+R-GCN + LLM (Shallow Aggregated Ranking),LLM fusion / possible leakage,108,0.367946,0.075783,0.182678,0.268262,0.461336
