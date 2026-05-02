@@ -1,13 +1,1 @@
-.DS_Store
-*/.DS_Store
-__pycache__/
-.pycache_tmp/
-wandb/
-data/
-results/
-.claude/
-.claudeignore
-CLAUDE.md
-TxGNN/
-configs/
-reports/
+txgnn_notebook -
