@@ -15,7 +15,7 @@ Code and results for our BMI 702 final project: an end-to-end graph–LLM hybrid
 
 ### `model/`
 - `rgcn_only_pipeline.ipynb` — R-GCN encoder with drug-conditioned cross-attention scorer, trained end-to-end on indication and off-label edges.
-- `feature_level_fusion (1).ipynb` — three feature-level fusion variants (degree-conditioned, autoencoder, residual autoencoder) injecting frozen LLM embeddings as node features.
+- `feature_level_fusion.ipynb` — three feature-level fusion variants (degree-conditioned, autoencoder, residual autoencoder) injecting frozen LLM embeddings as node features.
 - `late_fusion_pipeline.ipynb` — score-level late fusion with per-disease conditioned β gate.
 - `rgcn_LLM_hybrid.ipynb` — combined R-GCN + LLM hybrid wrapper used for the main reported configuration.
 
