@@ -36,4 +36,4 @@ Code and results for our BMI 702 final project: an end-to-end graph–LLM hybrid
 Run notebooks in this order: `data_preparation/` → `baseline/` → `model/` → `evaluation/`. Trained checkpoints and intermediate text embeddings are cached in each notebook's working directory.
 
 ## Compute
-Single NVIDIA A100 (Google Colab Pro). Full R-GCN training runs in ~1.5 hours; full pipeline including baselines and fusion variants in roughly half a day.
+Single NVIDIA A100 (Google Colab Pro). Full R-GCN training runs in ~5 hours; full pipeline including baselines and fusion variants in roughly half a day.
