@@ -1,58 +1,39 @@
-# Phenotype-Conditioned Drug Prediction for Rare Diseases
+# Phenotype-Conditioned Drug Repurposing for Undiagnosed Rare Disease Patients
 
-Given a rare disease patient's phenotype set, the model produces ranked drug candidates by dynamically constructing a patient-specific disease representation via drug-conditioned cross-attention over phenotype embeddings on a biomedical knowledge graph. The insiprations are:
-- **TxGNN** (Huang et al., 2024) — zero-shot drug repurposing on biomedical knowledge graphs; we extend its graph-based drug prediction framework to handle patient phenotype sets rather than fixed disease nodes
-- **SHEPHERD** (Alsentzer et al., 2023) — GNN-based rare disease diagnosis from phenotype and variant inputs; we adopt the phenotype-as-input paradigm but redirect it toward drug prediction with drug-conditioned aggregation
-- **PINNACLE** (Arakelyan et al., 2024) — context-conditioned protein embeddings; we apply the same conditioning intuition to disease representations, making them drug-conditioned rather than cell-type-conditioned
+Code and results for our BMI 702 final project: an end-to-end graph–LLM hybrid that ranks drugs from a patient's HPO phenotype set, without requiring a confirmed diagnosis. Built on PrimeKG.
 
-## Workflow
+## Repository structure
 
-1. **Knowledge Graph Encoding** — R-GCN over a graph of genes, drugs, phenotypes, and pathways (Open Targets, HPO, STRING). Each node gets a learned embedding.
-2. **Phenotype Set Encoding** — Each candidate drug embedding acts as the query; patient HPO phenotype embeddings act as keys/values. The model attends to different phenotypes when scoring different drugs.
-3. **Drug Scoring** — Cross-attention output (a drug-conditioned disease representation) is scored against each drug embedding to produce a ranked list.
+### `data_preparation/`
+- `primKG_preprocess.ipynb` — loads PrimeKG, filters to diseases with phenotype and indication edges, builds the heterogeneous graph used by all downstream models.
+- `train-test.ipynb` — 80/20 disease-level split, removes test-disease edges from the training subgraph to prevent leakage.
 
-## Data
+### `baseline/`
+- `pagerank.ipynb` — Personalized PageRank seeded from each test disease's phenotype nodes.
+- `cascade_no_leakage.ipynb` — PubCaseFinder → TxGNN cascade with K-sweep.
+- `llm_baseline_gpt4o.ipynb` — zero-shot GPT-3.5 prompted with HPO terms, returns ranked drug list.
 
-- Open Targets — gene-disease and drug-disease associations
+### `model/`
+- `rgcn_only_pipeline.ipynb` — R-GCN encoder with drug-conditioned cross-attention scorer, trained end-to-end on indication and off-label edges.
+- `feature_level_fusion (1).ipynb` — three feature-level fusion variants (degree-conditioned, autoencoder, residual autoencoder) injecting frozen LLM embeddings as node features.
+- `late_fusion_pipeline.ipynb` — score-level late fusion with per-disease conditioned β gate.
+- `rgcn_LLM_hybrid.ipynb` — combined R-GCN + LLM hybrid wrapper used for the main reported configuration.
 
-- Human Phenotype Ontology (HPO) — phenotype terms and hierarchy
+### `evaluation/`
+- `LLM_eval.ipynb` — GPT-3.5 / GPT-4o output parsing, drug-name normalization to PrimeKG.
+- `all_evaluate_metrics_compare.ipynb` — MRR and Recall@K computation across all methods on both test splits.
+- `fusion_error_analysis.ipynb` — stratified analysis (n_phenotypes, n_true_drugs, margin_gap, top10_jaccard), cold-start analysis, attention case studies.
 
-- STRING — protein-protein interaction network
+### `results/`
+- `final_all_test_summary.csv` — final MRR / Recall@K results on all 108 test diseases.
+- `final_undiagnosed_only_summary.csv` — same metrics on the 78-disease undiagnosable subset.
 
-- GWAS Catalog — common variant-to-phenotype associations used as additional graph edges (Optional)
+### `reports/`
+- `BMI702_Project_Proposal.pdf` — initial proposal.
+- `BMI702_Midterm_report.pdf` — midterm progress report.
 
-## Model
-A two-component model trained end-to-end:
+## Reproducing results
+Run notebooks in this order: `data_preparation/` → `baseline/` → `model/` → `evaluation/`. Trained checkpoints and intermediate text embeddings are cached in each notebook's working directory.
 
-- R-GCN — trained on the biomedical knowledge graph to produce node embeddings for genes, drugs, phenotypes, and pathways
-
-- Cross-attention layer — trained to produce drug-conditioned disease representations from patient HPO phenotype sets; drug embeddings serve as queries, phenotype embeddings as keys and values
-
-## Output
-
-For a given patient phenotype set, the system produces:
-- Ranked candidate drugs for repurposing, scored by mechanistic relevance
-- Attention weights tracing each recommendation to the phenotypes that drove it
-- Interpretable rationale (e.g., *"losartan ← aortic root dilation 0.6, mitral valve prolapse 0.2"*)
-- Zero-shot predictions for undiagnosed patients with arbitrary phenotype combinations
-
-## Key Innovation
-
-Improving current graph AI for drug prediction in **undiagnosed or atypically-presenting rare disease patients**.
-
-- **TxGNN** requires a confirmed disease label — each disease is a fixed node in the graph with a static embedding. Our model replaces this with a dynamic disease representation constructed at inference time from a patient's observed HPO phenotype set, requiring no diagnosis.
-- **SHEPHERD** takes phenotype sets as input but targets diagnostic prediction (which gene/disease is responsible), not drug prediction. Its phenotype aggregation is also a simple sum pooling with no conditioning on the downstream task.
-- **PINNACLE** introduces context-conditioned node embeddings (same protein, different embedding per cell type). We apply the same intuition in reverse: same phenotype set, different disease representation per candidate drug — making the representation drug-conditioned rather than cell-type-conditioned.
-
-Together, our model is the first to combine **phenotype-set input** (from SHEPHERD) with **conditional representation** (from PINNACLE) in a drug prediction framework (from TxGNN), specifically targeting the undiagnosed patient setting.
-
-## Implementation
-
-- Standard R-GCN (PyTorch Geometric) + transformer cross-attention (PyTorch). 
-- Graph constructed via Open Targets API. 
-- Runs on Google Colab.
-
-## Colab & Data Files Link
-https://colab.research.google.com/drive/1ESFVAFzeMDTkSXeO8CiCU4cfwScs0fzB?authuser=1#scrollTo=AcIMNq1969GR
-
-https://drive.google.com/drive/u/1/folders/14soGgEbW-K6NFWTzVSuxmJbri_WSmVYy
+## Compute
+Single NVIDIA A100 (Google Colab Pro). Full R-GCN training runs in ~1.5 hours; full pipeline including baselines and fusion variants in roughly half a day.
